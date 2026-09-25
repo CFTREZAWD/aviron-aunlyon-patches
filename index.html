@@ -688,6 +688,10 @@ input::placeholder,textarea::placeholder{color:var(--gris3)}
   <div class="modal"><div class="modal-header"><div class="modal-title" id="det-modal-title">Détail</div><button class="modal-close" onclick="closeDetailModal()">✕</button></div><div class="modal-body" id="det-modal-body"></div></div>
 </div>
 
+</div><!-- /app -->
+
+<!-- Les écrans d'onboarding et de mot de passe doivent rester HORS de #app :
+     #app est masqué (display:none) pendant leur affichage, ce qui masquerait aussi ses enfants. -->
 <!-- ══ ÉCRAN COMPLÉTION FICHE (première connexion athlète) ══ -->
 <div id="onboarding-page" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#111110;z-index:99999;overflow-y:auto;padding:2rem 1rem;box-sizing:border-box">
   <div style="max-width:480px;margin:0 auto">
@@ -747,7 +751,6 @@ input::placeholder,textarea::placeholder{color:var(--gris3)}
   </div>
 </div>
 
-</div><!-- /app -->
 
 <script>
 /* ── SUPABASE ── */
