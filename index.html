@@ -627,7 +627,7 @@ input::placeholder,textarea::placeholder{color:var(--gris3)}
   <div class="cal-nav">
     <div><div class="cal-title-txt" id="cal-title"></div><div class="sep-rouge" style="margin:6px 0 8px"></div><div id="cal-role-badge"></div></div>
     <div class="row wrap" style="gap:8px">
-      <div class="view-toggle"><button class="vtab active" id="vtab-month" onclick="setCalView('month')">Mois</button><button class="vtab" id="vtab-week" onclick="setCalView('week')">Semaine</button></div>
+      <div class="view-toggle"><button class="vtab" id="vtab-month" onclick="setCalView('month')">Mois</button><button class="vtab active" id="vtab-week" onclick="setCalView('week')">Semaine</button></div>
       <div class="row" style="gap:4px"><button class="btn sm icon" onclick="calNav(-1)">‹</button><button class="btn sm" onclick="calToday()">Aujourd'hui</button><button class="btn sm icon" onclick="calNav(1)">›</button></div>
       <button class="btn primary sm" id="cal-add-btn" style="display:none" onclick="openEventForm(null)">+ Programmer</button>
     </div>
@@ -1412,7 +1412,7 @@ async function deleteType(id){if(!confirm('Supprimer ce type ?'))return;var {err
 async function resetTypes(){if(!confirm('Réinitialiser les types par défaut ?'))return;await sb.from('session_types').delete().eq('coach_id',currentUser.id);sessionTypes=DEFAULT_TYPES.slice();renderTypes();populateTypeSelect();showAlert('settings-alert','Types réinitialisés.','info');}
 
 /* ── CALENDRIER ── */
-function setCalView(v){calView=v;document.getElementById('vtab-month').className='vtab'+(v==='month'?' active':'');document.getElementById('vtab-week').className='vtab'+(v==='week'?' active':'');renderCalendar();}
+function setCalView(v){calView=v;renderCalendar();}
 function calNav(d){if(calView==='month')calDate=new Date(calDate.getFullYear(),calDate.getMonth()+d,1);else calDate=new Date(calDate.getTime()+d*7*86400000);renderCalendar();}
 function calToday(){calDate=new Date();renderCalendar();}
 
@@ -1422,6 +1422,9 @@ function renderCalendar(){
   document.getElementById('cal-add-btn').style.display=isCoach?'inline-flex':'none';
   document.getElementById('cal-role-badge').innerHTML=isCoach?'<span class="tag rouge">Coach — édition</span>':'<span class="tag gray">Lecture seule</span>';
   var today=todayISO();
+  // Onglet surligné toujours synchronisé avec la vue affichée (la vue par défaut est "semaine")
+  document.getElementById('vtab-month').className='vtab'+(calView==='month'?' active':'');
+  document.getElementById('vtab-week').className='vtab'+(calView==='week'?' active':'');
   document.getElementById('cal-month-view').style.display=calView==='month'?'block':'none';
   document.getElementById('cal-week-view').style.display=calView==='week'?'block':'none';
   if(calView==='month')renderMonthView(today);else renderWeekView(today);
