@@ -2091,7 +2091,10 @@ async function finishInit(){
     if(currentProfile.role==='athlete'){
       var a=athletes[0];
       var doneLocally=currentUser&&safeLocalGet('ob_done_'+currentUser.id);
-      if(a&&!a.niveau&&!doneLocally){
+      // Fiche considérée comme vide seulement si AUCUN champ n'est rempli (le niveau seul ne suffit pas :
+      // un athlète peut avoir rempli sa fiche sans choisir de niveau, et le marqueur local est perdu en changeant d'appareil)
+      var ficheVide=a&&!a.niveau&&!a.dob&&!a.poids&&!a.taille&&!a.discipline&&!a.objectif;
+      if(ficheVide&&!doneLocally){
         onboardingActive=true;
         document.getElementById('app').style.display='none';
         document.getElementById('login-page').style.display='none';
