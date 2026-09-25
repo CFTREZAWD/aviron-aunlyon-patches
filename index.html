@@ -279,6 +279,20 @@ input::placeholder,textarea::placeholder{color:var(--gris3)}
 .si{padding:12px 0;border-bottom:1px solid var(--gris4)}
 .si:last-child{border-bottom:none;padding-bottom:0}
 
+/* PRÉSENCES */
+.pres-btns{display:flex;gap:6px;flex-wrap:wrap}
+.pres-btn{flex:1;min-width:88px}
+.pres-btn.on.present{background:var(--green-light);color:var(--green);border-color:var(--green)}
+.pres-btn.on.incertain{background:var(--amber-light);color:var(--amber);border-color:var(--amber)}
+.pres-btn.on.absent{background:var(--rouge-light);color:var(--rouge-dark);border-color:var(--rouge)}
+.pres-count{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;font-weight:700;margin-top:8px}
+.pres-count .p{color:var(--green)}.pres-count .i{color:var(--amber)}.pres-count .a{color:var(--rouge-dark)}.pres-count .n{color:var(--gris2)}
+.pres-group{margin-bottom:10px}
+.pres-group-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.pres-person{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--gris4);font-size:13px}
+.pres-person:last-child{border-bottom:none}
+.pres-person .avatar{width:26px;height:26px;font-size:10px;flex-shrink:0}
+
 /* ADMIN */
 .admin-user-row{background:var(--surface);border:1px solid var(--gris4);border-radius:var(--r);padding:1rem 1.25rem;margin-bottom:.75rem;box-shadow:var(--sh);display:flex;align-items:center;gap:12px}
 
@@ -527,7 +541,7 @@ input::placeholder,textarea::placeholder{color:var(--gris3)}
   </div>
 
   <!-- Séances à valider -->
-  <div class="stitle">Séances à valider</div>
+  <div class="stitle">Prochaines séances</div>
   <div id="ath-planned-sessions"></div>
 
   <!-- Formulaire validation séance planifiée -->
@@ -766,6 +780,8 @@ var sessionTypes = [];
 var groupes = [];
 var calEvents = [];
 var seances = {};  // { athlete_id: [...] }
+var presences = [];  // réponses Présent / Peut-être / Absent aux séances du calendrier
+var presenceEnabled = false;  // false tant que la table "presences" n'existe pas dans Supabase
 
 var editAthleteId = null;
 var editGroupId = null;
@@ -1050,6 +1066,7 @@ async function loadData(){
     var {data:tmpl}=await sb.from('seance_templates').select('*').eq('coach_id',currentUser.id).order('nom');
     seanceTemplates=tmpl||[];
   }
+  await loadPresences();
 }
 
 /* ── ADMIN ── */
@@ -1463,7 +1480,7 @@ function renderWeekView(today){
       prevus.forEach(function(ev){
         var c=typeColor(ev.type);
         var done=getRealisesForDate(iso).filter(function(r){return r.seance.type===ev.type;}).length;
-        html+='<div class="week-pill bg-'+c+'" onclick="showEventDetail(\''+ev.id+'\')">'+esc(ev.titre||ev.type)+(ev.duree?'<br><span style="font-size:10px;opacity:.8">'+ev.duree+' min</span>':'')+(done?'<br><span style="font-size:10px;color:var(--green);font-weight:700">✓ '+done+' réalisée'+(done>1?'s':'')+'</span>':'')+'</div>';
+        html+='<div class="week-pill bg-'+c+'" onclick="showEventDetail(\''+ev.id+'\')">'+esc(ev.titre||ev.type)+(ev.duree?'<br><span style="font-size:10px;opacity:.8">'+ev.duree+' min</span>':'')+(done?'<br><span style="font-size:10px;color:var(--green);font-weight:700">✓ '+done+' réalisée'+(done>1?'s':'')+'</span>':'')+weekPresenceHTML(ev,iso,today)+'</div>';
       });
       html+='</div>';
     }
@@ -1471,6 +1488,17 @@ function renderWeekView(today){
     html+='</div>';
   }
   html+='</div></div>';document.getElementById('cal-week-view').innerHTML=html;
+}
+
+// Vue semaine : nombre de présents annoncés (+ ma réponse pour un athlète) sur les séances à venir
+function weekPresenceHTML(ev,iso,today){
+  if(!presenceEnabled||iso<today)return'';
+  var n=presenceCounts(ev.id).present,out='<br><span style="font-size:10px;opacity:.85">👥 '+n+' présent'+(n>1?'s':'')+'</span>';
+  if(currentProfile.role==='athlete'){
+    var mine=myPresence(ev.id);
+    out+='<br><span style="font-size:10px;font-weight:700">'+(mine?PRES_LABELS[mine.statut]:'Réponds !')+'</span>';
+  }
+  return out;
 }
 
 /* ── MODALS CAL ── */
@@ -1773,6 +1801,7 @@ async function showEventDetail(id){
   var html='<div class="prevu-block"><div class="row wrap" style="gap:6px;margin-bottom:8px"><span class="tag '+typeColor(ev.type)+'">'+esc(ev.type)+'</span><span class="txs">'+fmtDate(ev.date)+(ev.heure?' à <strong>'+ev.heure+'</strong>':'')+'</span>'+(ev.allday?'<span class="tag purple">Journée entière</span>':'')+'</div>'+(ev.titre?'<div style="font-family:\'Barlow Condensed\',sans-serif;font-size:18px;font-weight:800;margin-bottom:6px">'+esc(ev.titre)+'</div>':'')+'<div class="txs">'+(ev.duree?ev.duree+' min · ':'')+(ev.dist?ev.dist+' km':'')+'</div>'+(ev.description?'<div class="tsm" style="margin-top:6px;line-height:1.5">'+esc(ev.description)+'</div>':'')+'</div>';
   if(ev.steps&&ev.steps.length){html+='<div class="stitle" style="margin-top:12px">Programme</div><div class="steps-list">'+ev.steps.map(function(s,i){var meta=[];if(s.duree)meta.push(s.duree+' min');if(s.dist)meta.push(s.dist+' km');return'<div class="step-row"><div class="step-num">'+(i+1)+'</div><div class="step-body"><div class="row wrap" style="gap:6px;margin-bottom:4px"><span class="step-tag '+(STEP_COLORS[s.stype]||'autre')+'">'+esc(s.stype)+'</span>'+(s.label?'<strong>'+esc(s.label)+'</strong>':'')+'</div>'+(meta.length?'<div class="txs">'+meta.join(' · ')+'</div>':'')+(s.consignes?'<div class="tsm" style="line-height:1.5">'+esc(s.consignes)+'</div>':'')+'</div></div>';}).join('')+'</div>';}
   if(ev.attachments&&ev.attachments.length){html+='<div class="stitle" style="margin-top:12px">Pièces jointes</div>'+ev.attachments.map(function(a){var href=a.url||a.data||'#';return'<div class="attachment"><div class="att-ico"><svg viewBox="0 0 24 24" fill="none" stroke="var(--rouge-dark)" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div style="flex:1;min-width:0"><div class="tsm fw">'+esc(a.name)+'</div><div class="txs">'+fmtSize(a.size)+'</div></div><a href="'+href+'" download="'+esc(a.name||'')+'" class="btn sm">↓ Télécharger</a></div>';}).join('');}
+  html+=presenceDetailHTML(ev,isCoach);
   if(isCoach)html+='<div class="sep"></div><div class="row" style="justify-content:flex-end;gap:8px"><button class="btn danger sm" onclick="deleteEvent(\''+id+'\')">Supprimer</button><button class="btn sm" onclick="closeDetailModal();openEventForm(null,\''+id+'\')">Modifier</button></div>';
   // Afficher les athlètes ayant validé cette séance
   var evDate=String(ev.date).split('T')[0];
@@ -1795,11 +1824,14 @@ async function showEventDetail(id){
   document.getElementById('det-modal-title').textContent=ev.titre||'Séance du '+fmtDate(ev.date);
   document.getElementById('det-modal-body').innerHTML=html;
   document.getElementById('detail-modal').style.display='flex';
+  detailEventId=id;
+  if(!isCoach&&presenceEnabled)loadPresenceNames(id);
 }
 
 function showRealisedDetail(athId,seanceId){
   var a=athletes.find(function(x){return x.id===athId;});if(!a)return;
   var s=(seances[athId]||[]).find(function(x){return x.id===seanceId;});if(!s)return;
+  detailEventId=null;
   var ch=charge(s.rpe,s.duree);
   var html='<div class="row" style="gap:10px;margin-bottom:12px"><div class="avatar">'+inits(a.prenom,a.nom)+'</div><div><div style="font-family:\'Barlow Condensed\',sans-serif;font-weight:800;font-size:17px">'+esc(a.prenom)+' '+esc(a.nom)+'</div><div class="txs">'+fmtDate(s.date)+'</div></div></div>'
     +'<div class="realise-block"><div class="row wrap" style="gap:6px;margin-bottom:8px"><span class="tag teal">'+esc(s.type)+'</span>'+(s.embarcation?'<span class="tag gray">'+esc(s.embarcation)+'</span>':'')+'</div>'
@@ -1819,7 +1851,133 @@ async function deleteEvent(id){
   calEvents=calEvents.filter(function(e){return e.id!==id;});
   closeDetailModal();renderCalendar();
 }
-function closeDetailModal(){document.getElementById('detail-modal').style.display='none';}
+function closeDetailModal(){document.getElementById('detail-modal').style.display='none';detailEventId=null;}
+
+/* ── PRÉSENCES ── */
+var detailEventId=null;
+var PRES_LABELS={present:'✓ Présent',incertain:'? Peut-être',absent:'✕ Absent'};
+
+async function loadPresences(){
+  // Si la table n'existe pas encore (script SQL pas exécuté), la fonctionnalité reste simplement masquée
+  try{
+    var {data,error}=await sb.from('presences').select('event_id,athlete_id,statut,commentaire');
+    if(error){presenceEnabled=false;presences=[];return;}
+    presenceEnabled=true;presences=data||[];
+  }catch(e){presenceEnabled=false;presences=[];}
+}
+function presencesFor(evId){return presences.filter(function(p){return String(p.event_id)===String(evId);});}
+function myPresence(evId){
+  var a=athletes[0];if(!a)return null;
+  return presences.find(function(p){return String(p.event_id)===String(evId)&&String(p.athlete_id)===String(a.id);})||null;
+}
+function presenceCounts(evId){
+  var c={present:0,incertain:0,absent:0};
+  presencesFor(evId).forEach(function(p){if(c[p.statut]!==undefined)c[p.statut]++;});
+  return c;
+}
+function isPastEvent(ev){return String(ev.date).split('T')[0]<todayISO();}
+// Athlètes attendus : membres du groupe de la séance, ou tous les athlètes si la séance n'a pas de groupe
+function expectedAthletes(ev){
+  if(!ev.groupe_id)return athletes;
+  var g=groupes.find(function(x){return x.id===ev.groupe_id;});
+  if(!g)return athletes;
+  return (g.memberIds||[]).map(function(mid){return athletes.find(function(a){return a.id===mid;});}).filter(Boolean);
+}
+function presenceCountHTML(evId,sansReponse){
+  var c=presenceCounts(evId);
+  return'<div class="pres-count"><span class="p">✓ '+c.present+' présent'+(c.present>1?'s':'')+'</span><span class="i">? '+c.incertain+' peut-être</span><span class="a">✕ '+c.absent+' absent'+(c.absent>1?'s':'')+'</span>'
+    +(sansReponse!==undefined?'<span class="n">— '+sansReponse+' sans réponse</span>':'')+'</div>';
+}
+function presenceButtonsHTML(ev){
+  var mine=myPresence(ev.id),cur=mine?mine.statut:null,past=isPastEvent(ev);
+  return'<div class="pres-btns">'+['present','incertain','absent'].map(function(s){
+    return'<button class="btn sm pres-btn'+(cur===s?' on '+s:'')+'"'+(past?' disabled':'')+' onclick="setPresence(\''+ev.id+'\',\''+s+'\')">'+PRES_LABELS[s]+'</button>';
+  }).join('')+'</div>';
+}
+
+async function setPresence(evId,statut){
+  var a=athletes[0];if(!a)return;
+  var mine=myPresence(evId);
+  var row={event_id:evId,athlete_id:a.id,statut:statut,commentaire:mine?mine.commentaire:null,updated_at:new Date().toISOString()};
+  var {error}=await sb.from('presences').upsert(row,{onConflict:'event_id,athlete_id'});
+  if(error){alert('Impossible d\'enregistrer ta réponse : '+error.message);return;}
+  if(mine)Object.assign(mine,row);else presences.push(row);
+  refreshPresenceViews(evId);
+}
+async function savePresenceComment(evId){
+  var mine=myPresence(evId);if(!mine)return;
+  var input=document.getElementById('pres-comment');if(!input)return;
+  var txt=input.value.trim()||null;
+  if(txt===(mine.commentaire||null))return;
+  var {error}=await sb.from('presences').update({commentaire:txt,updated_at:new Date().toISOString()}).eq('event_id',evId).eq('athlete_id',mine.athlete_id);
+  if(error){alert('Impossible d\'enregistrer le commentaire : '+error.message);return;}
+  mine.commentaire=txt;
+  var ok=document.getElementById('pres-comment-ok');if(ok){ok.style.display='inline';setTimeout(function(){ok.style.display='none';},2000);}
+}
+function refreshPresenceViews(evId){
+  renderPlannedSessions();
+  var cal=document.getElementById('tab-calendar');
+  if(cal&&cal.classList.contains('active'))renderCalendar();
+  if(detailEventId&&String(detailEventId)===String(evId))showEventDetail(evId);
+}
+
+function presencePersonHTML(prenom,nom,extra){
+  return'<div class="pres-person"><div class="avatar">'+inits(prenom,nom)+'</div><div style="flex:1;min-width:0"><div style="font-weight:700">'+esc(prenom)+' '+esc(nom)+'</div>'+(extra?'<div class="txs">'+esc(extra)+'</div>':'')+'</div></div>';
+}
+function presenceGroupHTML(title,cls,items){
+  if(!items.length)return'';
+  return'<div class="pres-group"><div class="pres-group-title" style="color:var('+cls+')">'+title+' ('+items.length+')</div>'+items.join('')+'</div>';
+}
+// Bloc "Présences" affiché dans le détail d'une séance
+function presenceDetailHTML(ev,isCoach){
+  if(!presenceEnabled)return'';
+  var html='<div class="sep"></div><div class="stitle">Présences</div>';
+  if(isCoach){
+    var list=presencesFor(ev.id),byAth={};
+    list.forEach(function(p){byAth[String(p.athlete_id)]=p;});
+    var groups={present:[],incertain:[],absent:[]},noAnswer=[];
+    expectedAthletes(ev).forEach(function(a){
+      var p=byAth[String(a.id)];
+      if(p&&groups[p.statut])groups[p.statut].push(presencePersonHTML(a.prenom,a.nom,p.commentaire));
+      else if(!p)noAnswer.push(presencePersonHTML(a.prenom,a.nom));
+    });
+    // Réponses d'athlètes hors groupe (ex : athlète retiré du groupe après avoir répondu)
+    list.forEach(function(p){
+      if(expectedAthletes(ev).some(function(a){return String(a.id)===String(p.athlete_id);}))return;
+      var a=athletes.find(function(x){return String(x.id)===String(p.athlete_id);});
+      if(a&&groups[p.statut])groups[p.statut].push(presencePersonHTML(a.prenom,a.nom,p.commentaire));
+    });
+    html+=presenceCountHTML(ev.id,noAnswer.length).replace('pres-count"','pres-count" style="margin:0 0 12px"');
+    html+=presenceGroupHTML('Présents','--green',groups.present)
+      +presenceGroupHTML('Peut-être','--amber',groups.incertain)
+      +presenceGroupHTML('Absents','--rouge-dark',groups.absent)
+      +presenceGroupHTML('Sans réponse','--gris2',noAnswer);
+    if(!list.length&&!noAnswer.length)html+='<div class="txs" style="text-align:center;padding:8px 0;color:var(--gris2)">Aucune réponse pour le moment</div>';
+  } else {
+    var mine=myPresence(ev.id);
+    html+='<div class="tsm" style="margin-bottom:8px">'+(isPastEvent(ev)?'Séance passée — les réponses sont fermées.':'Seras-tu là ?')+'</div>';
+    html+=presenceButtonsHTML(ev);
+    if(mine&&!isPastEvent(ev)){
+      html+='<div class="field" style="margin-top:10px"><label>Commentaire pour le coach (optionnel) <span id="pres-comment-ok" style="display:none;color:var(--green);text-transform:none">✓ enregistré</span></label>'
+        +'<input type="text" id="pres-comment" maxlength="200" placeholder="Ex : j\'arriverai 15 min en retard" value="'+esc(mine.commentaire||'')+'" onchange="savePresenceComment(\''+ev.id+'\')"></div>';
+    }
+    html+=presenceCountHTML(ev.id);
+    html+='<div id="pres-names" style="margin-top:10px"></div>';
+  }
+  return html;
+}
+// Athlètes : charge les noms des participants via la fonction sécurisée (ils n'ont pas accès aux fiches des autres)
+async function loadPresenceNames(evId){
+  var el=document.getElementById('pres-names');if(!el)return;
+  var {data,error}=await sb.rpc('presences_event',{p_event_id:String(evId)});
+  if(error||!data||!data.length)return;
+  if(String(detailEventId)!==String(evId))return;
+  var groups={present:[],incertain:[],absent:[]};
+  data.forEach(function(r){if(groups[r.statut])groups[r.statut].push(presencePersonHTML(r.prenom,r.nom));});
+  el.innerHTML=presenceGroupHTML('Présents','--green',groups.present)
+    +presenceGroupHTML('Peut-être','--amber',groups.incertain)
+    +presenceGroupHTML('Absents','--rouge-dark',groups.absent);
+}
 
 /* ── ANALYSE ── */
 function initAnalyse(){
@@ -1986,6 +2144,10 @@ function renderPlannedSessions(){
         )
       +'</div>'
       +(ev.description?'<div class="tsm" style="color:var(--gris2)">'+esc(ev.description)+'</div>':'')
+      +(presenceEnabled
+        ?'<div class="sep" style="margin:10px 0"></div><div class="row btwn" style="margin-bottom:6px"><span class="txs fw">Seras-tu là ?</span><button class="btn sm" style="border:none;background:none;padding:0;color:var(--gris2)" onclick="showEventDetail(\''+ev.id+'\')">Détails →</button></div>'
+          +presenceButtonsHTML(ev)+presenceCountHTML(ev.id)
+        :'')
     +'</div>';
   }).join('');
 }
